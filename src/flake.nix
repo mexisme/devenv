@@ -28,20 +28,31 @@
           inherit overlays;
         };
         lib = pkgs.lib;
-        importModule = path:
-          if lib.hasPrefix "./" path
-          then ./. + (builtins.substring 1 255 path) + "/devenv.nix"
-          else if lib.hasPrefix "../" path 
+        importModulePaths = path:
+          let
+            path' =
+              # Fail fast ;-)
+              if lib.hasPrefix "../" path
               then throw "devenv: ../ is not supported for imports"
-              else let
-                paths = lib.splitString "/" path;
-                name = builtins.head paths;
-                input = inputs.''${name} or (throw "Unknown input ''${name}");
-                subpath = "/''${lib.concatStringsSep "/" (builtins.tail paths)}";
-                devenvpath = "''${input}" + subpath + "/devenv.nix";
-                in if builtins.pathExists devenvpath
-                  then devenvpath
-                  else throw (devenvpath + " file does not exist for input ''${name}.");
+              # Max length of path is 255?
+              else if lib.hasPrefix "./" path
+              then ./. + (builtins.substring 1 255 path)
+              else path;
+            paths = lib.splitString "/" path';
+            name = builtins.head paths;
+            input = inputs.''${name} or (throw "Unknown input ''${name}");
+            subpath = "/''${lib.concatStringsSep "/" (builtins.tail paths)}";
+            devenvPath = "''${input}" + subpath;
+            pathAttrsFor = name:
+              let
+                path = devenvPath + "/''${name}";
+                pathOrError = if builtins.pathExists path then path
+                              else throw (path + " file does not exist for input ''${name}.");
+                value = { inherit name path pathOrError; };
+              in { inherit name value; };
+            pathAttrs = builtins.listToAttrs (map pathAttrsFor [ "devenv.nix" ".devenv.flake.nix" ]);
+          in pathAttrs;
+        importModule = path: (importModulePaths path)."devenv.nix".pathOrError;
         project = pkgs.lib.evalModules {
           specialArgs = inputs // { inherit inputs pkgs; };
           modules = [
