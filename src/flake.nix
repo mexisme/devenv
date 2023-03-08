@@ -52,13 +52,17 @@
               in { inherit name value; };
             pathAttrs = builtins.listToAttrs (map pathAttrsFor [ "devenv.nix" ".devenv.flake.nix" ]);
           in pathAttrs;
-        importModule = path: (importModulePaths path)."devenv.nix".pathOrError;
+        importModules =
+          let
+            importDevenvModule = path: (importModulePaths path)."devenv.nix".pathOrError;
+          in
+             map importDevenvModule (devenv.imports or []);
         project = pkgs.lib.evalModules {
           specialArgs = inputs // { inherit inputs pkgs; };
           modules = [
             (inputs.devenv.modules + /top-level.nix)
             { devenv.cliVersion = "${version}"; }
-          ] ++ (map importModule (devenv.imports or [])) ++ [
+          ] ++ importModules ++ [
             ./devenv.nix
             (devenv.devenv or {})
             (if builtins.pathExists ./devenv.local.nix then ./devenv.local.nix else {})
