@@ -42,21 +42,18 @@
             name = builtins.head paths;
             input = inputs.''${name} or (throw "Unknown input ''${name}");
             subpath = "/''${lib.concatStringsSep "/" (builtins.tail paths)}";
-            devenvPath = "''${input}" + subpath;
-            pathAttrsFor = name:
-              let
-                path = devenvPath + "/''${name}";
-                pathOrError = if builtins.pathExists path then path
-                              else throw (path + " file does not exist for input ''${name}.");
-                value = { inherit name path pathOrError; };
-              in { inherit name value; };
-            pathAttrs = builtins.listToAttrs (map pathAttrsFor [ "devenv.nix" ".devenv.flake.nix" ]);
-          in pathAttrs;
+            devenvPath = "''${input}" + subpath + "/devenv.nix";
+            pathOrError =
+              if builtins.pathExists devenvPath then path
+              else throw (path + " file does not exist for input ''${name}.");
+          in { path = devenvPath;
+               inherit pathOrError input;
+             };
         importModules =
           let
-            importDevenvModule = path: (importModulePaths path)."devenv.nix".pathOrError;
+            importModule = path: (importModulePaths path).pathOrError;
           in
-             map importDevenvModule (devenv.imports or []);
+             map importModule (devenv.imports or []);
         project = pkgs.lib.evalModules {
           specialArgs = inputs // { inherit inputs pkgs; };
           modules = [
