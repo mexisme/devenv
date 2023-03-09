@@ -14,19 +14,48 @@
         devenv = if builtins.pathExists ./.devenv/devenv.json
           then builtins.fromJSON (builtins.readFile ./.devenv/devenv.json)
           else {};
-        getOverlays = inputName: inputAttrs:
-          map (overlay: let
-              input = inputs.''${inputName} or (throw "No such input `''${inputName}` while trying to configure overlays.");
-            in input.overlays.''${overlay} or (throw "Input `''${inputName}` has no overlay called `''${overlay}`. Supported overlays: ''${nixpkgs.lib.concatStringsSep ", " (builtins.attrNames input.overlays)}"))
-            inputAttrs.overlays or [];
-        overlays = nixpkgs.lib.flatten (nixpkgs.lib.mapAttrsToList getOverlays (devenv.inputs or {}));
-        pkgs = import nixpkgs {
-          system = "${pkgs.system}";
-          config = {
-            allowUnfree = devenv.allowUnfree or false; 
-          };
-          inherit overlays;
-        };
+
+        getInput = inputOrName:
+          let
+            supportedInputs = nixpkgs.lib.concatStringsSep ", " (builtins.attrNames inputs);
+          in
+            if (builtins.isString inputOrName)
+            then inputs.''${inputOrName} or (throw "No such input `''${inputOrName}`; supported inputs: [''${supportedInputs}].")
+            else inputOrName;
+
+        getOverlayFromInput = inputOrName: overlayOrName:
+          let
+            # These should only execute if `overlayOrName` is a string:
+            input = builtins.addErrorContext "while getting overlay `''${overlayOrName}`" (getInput inputOrName);
+            overlays = input.overlays or (throw "Input `''${input.name}` does not have any overlays.");
+            supportedOverlays = nixpkgs.lib.concatStringsSep ", " (builtins.attrNames input.overlays or []);
+            overlay =
+              if (builtins.isString overlayOrName)
+              then overlays.''${overlayOrName} or (throw "Input `''${input.name}` does not have an overlay called `''${overlayOrName}`; supported overlays: [''${supportedOverlays}].")
+              else overlayOrName;
+          in overlay;
+
+        getOverlaysFromInput = inputOrName: inputAttrs:
+          map (overlayOrName: builtins.addErrorContext "while getting overlays" (getOverlayFromInput inputOrName overlayOrName)) inputAttrs.overlays or [];
+
+        buildPackageSet = {
+          packageSet,
+          devenvConfig,
+          system ? "${pkgs.system}",
+        }:
+          let
+            overlays = nixpkgs.lib.flatten (nixpkgs.lib.mapAttrsToList getOverlaysFromInput (devenvConfig.inputs or {}));
+          in
+            import packageSet {
+              inherit system;
+              config = {
+                allowUnfree = devenvConfig.allowUnfree or false;
+              };
+              inherit overlays;
+            };
+
+        pkgs = buildPackageSet { packageSet = nixpkgs; devenvConfig = devenv; };
+
         lib = pkgs.lib;
         importModule = path:
           if lib.hasPrefix "./" path
